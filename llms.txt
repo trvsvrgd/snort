@@ -1,0 +1,22 @@
+# ARFM (Agent-Readable File Manager)
+
+This workspace contains a bimodal project coordinator:
+- Human format: Markdown topics in `/topics/`
+- Machine format: JSON(-LD-like) derived from Markdown and validated with JSON Schema templates in `/templates/`
+- Change tracking: atomic block-level history in `/history/tracker.json`
+
+## Local HTTP API (default dev)
+
+Base: `http://localhost:5174`
+
+- `GET /api/topics` — list topics
+- `GET /api/topics/:name` — load topic markdown + resolved template
+- `PUT /api/topics/:name` — save topic markdown (preserves/repairs block @id tags, writes history)
+- `GET /api/history` — read tracker history
+- `POST /api/chat` — mock LLM chat (supports tool: `propose_edit`)
+
+## MCP server (integrated)
+
+The backend exposes an MCP server with a tool:
+- `propose_edit` — propose a change to a specific `Block_ID` given template rules and history context.
+
