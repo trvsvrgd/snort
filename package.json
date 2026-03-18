@@ -1,0 +1,21 @@
+{
+  "name": "arfm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Agent-Readable File Manager (ARFM): bimodal markdown + JSON-LD with block-level IDs, Yjs collaboration, and MCP tools.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/server & npm run dev --workspace apps/web",
+    "dev:web": "npm run dev --workspace apps/web",
+    "dev:server": "npm run dev --workspace apps/server",
+    "build": "npm run build --workspace apps/web",
+    "start": "npm run start --workspace apps/server",
+    "lint": "npm run lint --workspace apps/web"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
+
