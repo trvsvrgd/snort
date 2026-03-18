@@ -1,7 +1,56 @@
 @import "tailwindcss";
 
+:root {
+  --cardboard: #966f33;
+  --safety-orange: #ff6600;
+  --terminal-green: #00ff41;
+}
+
 html,
 body {
   height: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
+body {
+  background: var(--cardboard);
+  color: var(--terminal-green);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Loud/unpolished texture overlay (subtle “glitchy” grid/scanlines). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.25;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 102, 0, 0.25) 0px,
+      rgba(255, 102, 0, 0.25) 1px,
+      transparent 1px,
+      transparent 4px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 255, 65, 0.12) 0px,
+      rgba(0, 255, 65, 0.12) 1px,
+      transparent 1px,
+      transparent 6px
+    );
+  mix-blend-mode: overlay;
+}
+
+code,
+pre,
+.terminal-code {
+  color: var(--terminal-green);
 }
 

@@ -64,6 +64,98 @@ function extractIds(markdown: string) {
   return ids;
 }
 
+function SnortPug() {
+  // Low-fidelity “paint-style” line art (inline SVG so no external assets are needed).
+  return (
+    <svg width="44" height="44" viewBox="0 0 64 64" role="img" aria-label="Pug in VR headset">
+      <path
+        d="M20 32c-5-2-8-7-6-13 2-7 11-10 18-7 7-3 16 0 18 7 2 6-1 11-6 13"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M18 20c-5-2-10 0-12 5 2 1 4 2 6 3 1-3 3-6 6-8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M46 20c5-2 10 0 12 5-2 1-4 2-6 3-1-3-3-6-6-8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 46c8-8 28-8 36 0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* VR headset */}
+      <path
+        d="M18 30c3-3 7-5 14-5s11 2 14 5"
+        fill="none"
+        stroke="#FF6600"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect
+        x="20"
+        y="30"
+        width="12"
+        height="12"
+        rx="4"
+        ry="4"
+        fill="none"
+        stroke="#FF6600"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect
+        x="32"
+        y="30"
+        width="12"
+        height="12"
+        rx="4"
+        ry="4"
+        fill="none"
+        stroke="#FF6600"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Nose */}
+      <path
+        d="M28 39c2 2 6 2 8 0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Eyes */}
+      <path
+        d="M25 36h.01M37 36h.01"
+        fill="none"
+        stroke="#00FF41"
+        strokeWidth="4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function App() {
   const [topics, setTopics] = useState<string[]>([]);
   const [selectedTopic, setSelectedTopic] = useState<string>("vendor-evaluation.md");
@@ -168,16 +260,32 @@ export function App() {
 
   return (
     <div className="h-screen w-screen flex">
-      <aside className="w-64 border-r border-slate-800 bg-slate-950 p-3 flex flex-col gap-3">
-        <div className="text-sm font-semibold tracking-wide">Topics</div>
+      <aside className="w-72 border-r-[4px] border-safetyOrange bg-cardboard p-3 flex flex-col gap-3">
+        <div className="flex items-start gap-3 border-b-[4px] border-safetyOrange pb-3">
+          <div className="min-w-0">
+            <div className="text-sm font-bold tracking-widest text-terminalGreen uppercase leading-tight">
+              🐽 SNORT
+            </div>
+            <div className="text-[11px] text-terminalGreen/90 mt-1">
+              Snort: Because your machine-readable files shouldn't be a black box. 🐽
+            </div>
+          </div>
+          <div className="text-terminalGreen mt-0.5">
+            <SnortPug />
+          </div>
+        </div>
+
+        <div className="text-sm font-bold tracking-widest text-terminalGreen uppercase">Topics</div>
         <div className="flex flex-col gap-1 overflow-auto">
           {topics.map((t) => (
             <button
               key={t}
               onClick={() => setSelectedTopic(t)}
               className={[
-                "text-left px-2 py-1 rounded",
-                t === selectedTopic ? "bg-slate-800" : "hover:bg-slate-900"
+                "text-left px-2 py-1 rounded border-[3px] transition-colors",
+                t === selectedTopic
+                  ? "bg-safetyOrange text-ink border-safetyOrange"
+                  : "bg-ink hover:bg-ink2 text-terminalGreen border-ink hover:border-safetyOrange/60"
               ].join(" ")}
             >
               {t}
@@ -186,10 +294,10 @@ export function App() {
         </div>
 
         <div className="mt-auto flex flex-col gap-2">
-          <label className="text-xs text-slate-300">
+          <label className="text-xs text-terminalGreen/90">
             Author
             <select
-              className="mt-1 w-full bg-slate-900 border border-slate-800 rounded px-2 py-1"
+              className="mt-1 w-full bg-ink border-[3px] border-safetyOrange/60 rounded px-2 py-1 text-terminalGreen"
               value={author}
               onChange={(e) => setAuthor(e.target.value as any)}
             >
@@ -197,19 +305,24 @@ export function App() {
               <option value="LLM">LLM</option>
             </select>
           </label>
-          <button onClick={save} className="w-full bg-indigo-600 hover:bg-indigo-500 rounded px-3 py-2 text-sm">
+          <button
+            onClick={save}
+            className="w-full bg-safetyOrange hover:bg-safetyOrange/90 rounded px-3 py-2 text-sm font-bold border-[3px] border-terminalGreen text-ink"
+          >
             Save + Track
           </button>
         </div>
       </aside>
 
       <main className="flex-1 grid grid-cols-12">
-        <section className="col-span-7 border-r border-slate-800">
-          <div className="px-3 py-2 border-b border-slate-800 text-sm flex items-center justify-between">
-            <div className="font-semibold">Markdown (human)</div>
-            <div className="text-xs text-slate-400">IDs preserved as <code>&lt;!-- @id: ... --&gt;</code></div>
+        <section className="col-span-7 border-r-[4px] border-safetyOrange bg-cardboard">
+          <div className="px-3 py-2 border-b-[4px] border-safetyOrange text-sm flex items-center justify-between">
+            <div className="font-bold uppercase text-terminalGreen">Markdown (human)</div>
+            <div className="text-xs text-terminalGreen/90">
+              IDs preserved as <code className="terminal-code">&lt;!-- @id: ... --&gt;</code>
+            </div>
           </div>
-          <div className="h-[calc(100vh-41px)]">
+          <div className="h-[calc(100vh-41px)] bg-ink">
             <Editor
               height="100%"
               defaultLanguage="markdown"
@@ -231,46 +344,50 @@ export function App() {
           </div>
         </section>
 
-        <section className="col-span-3 border-r border-slate-800 flex flex-col">
-          <div className="px-3 py-2 border-b border-slate-800 text-sm font-semibold">Template validation (machine)</div>
-          <div className="p-3 overflow-auto text-xs flex-1">
+        <section className="col-span-3 border-r-[4px] border-safetyOrange flex flex-col bg-cardboard">
+          <div className="px-3 py-2 border-b-[4px] border-safetyOrange text-sm font-bold uppercase text-terminalGreen">
+            Template validation (machine)
+          </div>
+          <div className="p-3 overflow-auto text-xs flex-1 text-terminalGreen">
             {validation ? (
               <>
                 <div className="mb-2">
                   <div>
-                    Schema: <span className="text-slate-200">{validation.schemaFile ?? "—"}</span>
+                    Schema: <span className="text-terminalGreen/95">{validation.schemaFile ?? "—"}</span>
                   </div>
                   <div>
                     Status:{" "}
-                    <span className={validation.ok ? "text-emerald-400" : "text-rose-400"}>
+                    <span className={validation.ok ? "text-terminalGreen" : "text-safetyOrange"}>
                       {validation.ok ? "OK" : "INVALID"}
                     </span>
                   </div>
                 </div>
                 {!validation.ok && validation.errors.length ? (
-                  <ul className="list-disc ml-4 mb-3 text-rose-300">
+                  <ul className="list-disc ml-4 mb-3 text-safetyOrange/95">
                     {validation.errors.map((e, idx) => (
                       <li key={idx}>{e}</li>
                     ))}
                   </ul>
                 ) : null}
-                <div className="text-slate-300 mb-1">Derived structure</div>
-                <pre className="bg-slate-900 border border-slate-800 rounded p-2 whitespace-pre-wrap break-words">
+                <div className="text-terminalGreen/90 mb-1">Derived structure</div>
+                <pre className="bg-ink border-[3px] border-safetyOrange rounded p-2 whitespace-pre-wrap break-words">
                   {JSON.stringify(validation.structured, null, 2)}
                 </pre>
               </>
             ) : (
-              <div className="text-slate-400">No validation loaded.</div>
+              <div className="text-terminalGreen/70">No validation loaded.</div>
             )}
           </div>
         </section>
 
         <section className="col-span-2 flex flex-col">
-          <div className="px-3 py-2 border-b border-slate-800 text-sm font-semibold">History</div>
-          <div className="p-3 overflow-auto text-xs flex-1">
+          <div className="px-3 py-2 border-b-[4px] border-safetyOrange text-sm font-bold uppercase text-terminalGreen bg-cardboard">
+            History
+          </div>
+          <div className="p-3 overflow-auto text-xs flex-1 bg-cardboard text-terminalGreen">
             {tracker ? (
               <table className="w-full text-left border-collapse">
-                <thead className="text-slate-300">
+                <thead className="text-terminalGreen/90">
                   <tr>
                     <th className="pb-2">Block_ID</th>
                     <th className="pb-2">Time</th>
@@ -286,7 +403,7 @@ export function App() {
                     .map((e, idx) => (
                       <tr
                         key={`${e.block_id}-${e.timestamp}-${idx}`}
-                        className="border-t border-slate-900 hover:bg-slate-900 cursor-pointer"
+                        className="border-t border-safetyOrange/30 hover:bg-ink2 cursor-pointer"
                         onClick={() => setTargetBlockId(e.block_id)}
                       >
                         <td className="py-1 pr-2 truncate max-w-[6rem]" title={e.block_id}>
@@ -300,46 +417,46 @@ export function App() {
                 </tbody>
               </table>
             ) : (
-              <div className="text-slate-400">No history yet.</div>
+              <div className="text-terminalGreen/70">No history yet.</div>
             )}
           </div>
 
-          <div className="border-t border-slate-800 p-3">
-            <div className="text-xs text-slate-300 mb-1">LLM sidebar (mock)</div>
-            <label className="text-xs text-slate-400">
+          <div className="border-t-[4px] border-safetyOrange p-3 bg-cardboard">
+            <div className="text-xs text-terminalGreen/90 mb-1">LLM sidebar (mock)</div>
+            <label className="text-xs text-terminalGreen/80">
               Block_ID
               <input
                 value={targetBlockId}
                 onChange={(e) => setTargetBlockId(e.target.value)}
-                className="mt-1 w-full bg-slate-900 border border-slate-800 rounded px-2 py-1"
+                className="mt-1 w-full bg-ink border-[3px] border-safetyOrange/60 rounded px-2 py-1 text-terminalGreen"
                 placeholder="uuid"
               />
             </label>
             <textarea
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              className="mt-2 w-full h-20 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs"
+              className="mt-2 w-full h-20 bg-ink border-[3px] border-safetyOrange/60 rounded px-2 py-1 text-xs text-terminalGreen"
               placeholder="Instruction for propose_edit (e.g., tighten requirements wording)."
             />
             <div className="mt-2 flex gap-2">
               <button
                 onClick={runProposeEdit}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 rounded px-2 py-1 text-xs"
+                className="flex-1 bg-ink hover:bg-ink2 rounded px-2 py-1 text-xs font-bold border-[3px] border-safetyOrange/40 text-terminalGreen"
               >
                 propose_edit
               </button>
               <button
                 onClick={applyProposal}
-                className="flex-1 bg-emerald-700 hover:bg-emerald-600 rounded px-2 py-1 text-xs"
+                className="flex-1 bg-safetyOrange hover:bg-safetyOrange/90 rounded px-2 py-1 text-xs font-bold border-[3px] border-terminalGreen text-ink"
               >
                 Apply
               </button>
             </div>
-            <div className="mt-2 max-h-32 overflow-auto text-[11px] text-slate-300">
+            <div className="mt-2 max-h-32 overflow-auto text-[11px] text-terminalGreen/90">
               {chatLog.slice(-4).map((m, idx) => (
                 <pre
                   key={idx}
-                  className="whitespace-pre-wrap break-words bg-slate-950 border border-slate-900 rounded p-2 mb-2"
+                  className="whitespace-pre-wrap break-words bg-ink border-[3px] border-safetyOrange/40 rounded p-2 mb-2"
                 >
                   {m.role}: {typeof m.content === "string" ? m.content : JSON.stringify(m.content, null, 2)}
                 </pre>
