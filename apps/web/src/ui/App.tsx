@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import Editor, { type Monaco } from "@monaco-editor/react";
+import { useEffect, useMemo, useState } from "react";
+import Editor from "@monaco-editor/react";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { MonacoBinding } from "y-monaco";
@@ -28,6 +28,7 @@ type TrackerEvent = {
 };
 
 type Tracker = { version: number; events: TrackerEvent[] };
+type ChatMessage = { role: string; content: unknown };
 
 async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -64,96 +65,32 @@ function extractIds(markdown: string) {
   return ids;
 }
 
-function SnortPug() {
-  // Low-fidelity “paint-style” line art (inline SVG so no external assets are needed).
-  return (
-    <svg width="44" height="44" viewBox="0 0 64 64" role="img" aria-label="Pug in VR headset">
-      <path
-        d="M20 32c-5-2-8-7-6-13 2-7 11-10 18-7 7-3 16 0 18 7 2 6-1 11-6 13"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M18 20c-5-2-10 0-12 5 2 1 4 2 6 3 1-3 3-6 6-8Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M46 20c5-2 10 0 12 5-2 1-4 2-6 3-1-3-3-6-6-8Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 46c8-8 28-8 36 0"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* VR headset */}
-      <path
-        d="M18 30c3-3 7-5 14-5s11 2 14 5"
-        fill="none"
-        stroke="#FF6600"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect
-        x="20"
-        y="30"
-        width="12"
-        height="12"
-        rx="4"
-        ry="4"
-        fill="none"
-        stroke="#FF6600"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect
-        x="32"
-        y="30"
-        width="12"
-        height="12"
-        rx="4"
-        ry="4"
-        fill="none"
-        stroke="#FF6600"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* Nose */}
-      <path
-        d="M28 39c2 2 6 2 8 0"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* Eyes */}
-      <path
-        d="M25 36h.01M37 36h.01"
-        fill="none"
-        stroke="#00FF41"
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
+function formatTimestamp(timestamp: string) {
+  return new Date(timestamp).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function getReplacementMarkdown(content: unknown) {
+  if (typeof content !== "object" || content === null) return undefined;
+  const proposal = (content as { proposal?: unknown }).proposal;
+  if (typeof proposal !== "object" || proposal === null) return undefined;
+  const replacement = (proposal as { replacement_markdown?: unknown }).replacement_markdown;
+  return typeof replacement === "string" ? replacement : undefined;
+}
+
+function stringifyContent(content: unknown) {
+  if (typeof content === "string") return content;
+  if (content == null) return "null";
+  return JSON.stringify(content, null, 2);
+}
+
+function shortenId(value: string) {
+  if (value.length <= 14) return value;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
 export function App() {
@@ -161,18 +98,23 @@ export function App() {
   const [selectedTopic, setSelectedTopic] = useState<string>("vendor-evaluation.md");
   const [markdown, setMarkdown] = useState<string>("");
   const [validation, setValidation] = useState<ValidationResult | null>(null);
+  const [topicLoadError, setTopicLoadError] = useState<string | null>(null);
   const [tracker, setTracker] = useState<Tracker | null>(null);
   const [author, setAuthor] = useState<"Human" | "LLM">("Human");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isProposing, setIsProposing] = useState(false);
 
   const [chatInput, setChatInput] = useState("");
-  const [chatLog, setChatLog] = useState<Array<{ role: string; content: unknown }>>([]);
+  const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
   const [targetBlockId, setTargetBlockId] = useState<string>("");
-
-  const editorRef = useRef<import("monaco-editor").editor.IStandaloneCodeEditor | null>(null);
-  const monacoRef = useRef<Monaco | null>(null);
 
   const ydoc = useMemo(() => new Y.Doc(), []);
   const ytext = useMemo(() => ydoc.getText("markdown"), [ydoc]);
+  const blockIds = useMemo(() => extractIds(markdown), [markdown]);
+  const recentEvents = useMemo(() => tracker?.events.slice().reverse().slice(0, 10) ?? [], [tracker]);
 
   useEffect(() => {
     apiGet<TopicsListResponse>("/api/topics")
@@ -182,20 +124,54 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    apiGet<TopicResponse>(`/api/topics/${encodeURIComponent(selectedTopic)}`).then((r) => {
+
+    async function loadTopicAndHistory() {
+      setTopicLoadError(null);
+      setHistoryError(null);
+      setSaveError(null);
+      setChatError(null);
+
+      const [topicResult, historyResult] = await Promise.allSettled([
+        apiGet<TopicResponse>(`/api/topics/${encodeURIComponent(selectedTopic)}`),
+        apiGet<Tracker>("/api/history")
+      ]);
+
       if (cancelled) return;
-      setMarkdown(r.markdown);
-      setValidation(r.validation);
-      ydoc.transact(() => {
-        ytext.delete(0, ytext.length);
-        ytext.insert(0, r.markdown);
-      });
-      const ids = extractIds(r.markdown);
-      setTargetBlockId(ids[0] ?? "");
-    });
-    apiGet<Tracker>("/api/history").then((t) => {
-      if (!cancelled) setTracker(t);
-    });
+
+      if (topicResult.status === "fulfilled") {
+        const topic = topicResult.value;
+        setMarkdown(topic.markdown);
+        setValidation(topic.validation);
+        ydoc.transact(() => {
+          ytext.delete(0, ytext.length);
+          ytext.insert(0, topic.markdown);
+        });
+        setTargetBlockId(extractIds(topic.markdown)[0] ?? "");
+      } else {
+        const msg =
+          topicResult.reason instanceof Error ? topicResult.reason.message : String(topicResult.reason);
+        setTopicLoadError(msg);
+        setMarkdown("");
+        setValidation({
+          ok: false,
+          schemaFile: null,
+          errors: [msg],
+          structured: null
+        });
+      }
+
+      if (historyResult.status === "fulfilled") {
+        setTracker(historyResult.value);
+      } else {
+        const msg =
+          historyResult.reason instanceof Error ? historyResult.reason.message : String(historyResult.reason);
+        setHistoryError(msg);
+        setTracker(null);
+      }
+    }
+
+    void loadTopicAndHistory();
+
     return () => {
       cancelled = true;
     };
@@ -207,35 +183,57 @@ export function App() {
     return () => ytext.unobserve(onUpdate);
   }, [ytext]);
 
-  useEffect(() => {
-    const provider = new WebsocketProvider("ws://localhost:1234", `topic:${selectedTopic}`, ydoc);
-    return () => provider.destroy();
-  }, [selectedTopic, ydoc]);
-
   async function save() {
-    const r = await apiPut<{ markdown: string; validation: ValidationResult }>(
-      `/api/topics/${encodeURIComponent(selectedTopic)}`,
-      { markdown: ytext.toString(), author }
-    );
-    setValidation(r.validation);
-    setMarkdown(r.markdown);
-    const t = await apiGet<Tracker>("/api/history");
-    setTracker(t);
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const r = await apiPut<{ markdown: string; validation: ValidationResult }>(
+        `/api/topics/${encodeURIComponent(selectedTopic)}`,
+        { markdown: ytext.toString(), author }
+      );
+      setValidation(r.validation);
+      setMarkdown(r.markdown);
+      setTracker(await apiGet<Tracker>("/api/history"));
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function runProposeEdit() {
-    const tool = {
-      name: "propose_edit",
-      args: { block_id: targetBlockId, instruction: chatInput, current_markdown: ytext.toString() }
-    };
-    const r = await apiPost<{ role: string; content: any }>("/api/chat", { tool });
-    setChatLog((l) => [...l, { role: "user", content: chatInput }, r]);
-    setChatInput("");
+    if (!targetBlockId.trim()) {
+      setChatError("Choose a block before requesting an edit.");
+      return;
+    }
+    if (!chatInput.trim()) {
+      setChatError("Add an instruction before running propose_edit.");
+      return;
+    }
+
+    setIsProposing(true);
+    setChatError(null);
+
+    try {
+      const tool = {
+        name: "propose_edit",
+        args: { block_id: targetBlockId, instruction: chatInput, current_markdown: ytext.toString() }
+      };
+      const r = await apiPost<ChatMessage>("/api/chat", { tool });
+      setChatLog((messages) => [...messages, { role: "user", content: chatInput }, r]);
+      setChatInput("");
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsProposing(false);
+    }
   }
 
   function applyProposal() {
-    const last = [...chatLog].reverse().find((m) => (m as any)?.content?.proposal?.replacement_markdown);
-    const replacement = (last as any)?.content?.proposal?.replacement_markdown as string | undefined;
+    const replacement = [...chatLog]
+      .reverse()
+      .map((message) => getReplacementMarkdown(message.content))
+      .find(Boolean);
     if (!replacement) return;
 
     const md = ytext.toString();
@@ -259,213 +257,355 @@ export function App() {
   }
 
   return (
-    <div className="h-screen w-screen flex">
-      <aside className="w-72 border-r-[4px] border-safetyOrange bg-cardboard p-3 flex flex-col gap-3">
-        <div className="flex items-start gap-3 border-b-[4px] border-safetyOrange pb-3">
-          <div className="min-w-0">
-            <div className="text-sm font-bold tracking-widest text-terminalGreen uppercase leading-tight">
-              🐽 SNORT
+    <div className="min-h-screen bg-transparent text-slate-100">
+      <div className="grid min-h-screen gap-4 p-4 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
+        <aside className="panel-surface flex min-h-0 flex-col rounded-3xl border border-white/10 p-5">
+          <div className="space-y-4">
+            <div className="inline-flex w-fit items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.24em] text-cyan-200">
+              SNORT workspace
             </div>
-            <div className="text-[11px] text-terminalGreen/90 mt-1">
-              Snort: Because your machine-readable files shouldn't be a black box. 🐽
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-white">SNORT</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                Cleaner editing for markdown topics, machine validation, history tracking, and assisted
+                block updates.
+              </p>
             </div>
-          </div>
-          <div className="text-terminalGreen mt-0.5">
-            <SnortPug />
-          </div>
-        </div>
-
-        <div className="text-sm font-bold tracking-widest text-terminalGreen uppercase">Topics</div>
-        <div className="flex flex-col gap-1 overflow-auto">
-          {topics.map((t) => (
-            <button
-              key={t}
-              onClick={() => setSelectedTopic(t)}
-              className={[
-                "text-left px-2 py-1 rounded border-[3px] transition-colors",
-                t === selectedTopic
-                  ? "bg-safetyOrange text-ink border-safetyOrange"
-                  : "bg-ink hover:bg-ink2 text-terminalGreen border-ink hover:border-safetyOrange/60"
-              ].join(" ")}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-auto flex flex-col gap-2">
-          <label className="text-xs text-terminalGreen/90">
-            Author
-            <select
-              className="mt-1 w-full bg-ink border-[3px] border-safetyOrange/60 rounded px-2 py-1 text-terminalGreen"
-              value={author}
-              onChange={(e) => setAuthor(e.target.value as any)}
-            >
-              <option value="Human">Human</option>
-              <option value="LLM">LLM</option>
-            </select>
-          </label>
-          <button
-            onClick={save}
-            className="w-full bg-safetyOrange hover:bg-safetyOrange/90 rounded px-3 py-2 text-sm font-bold border-[3px] border-terminalGreen text-ink"
-          >
-            Save + Track
-          </button>
-        </div>
-      </aside>
-
-      <main className="flex-1 grid grid-cols-12">
-        <section className="col-span-7 border-r-[4px] border-safetyOrange bg-cardboard">
-          <div className="px-3 py-2 border-b-[4px] border-safetyOrange text-sm flex items-center justify-between">
-            <div className="font-bold uppercase text-terminalGreen">Markdown (human)</div>
-            <div className="text-xs text-terminalGreen/90">
-              IDs preserved as <code className="terminal-code">&lt;!-- @id: ... --&gt;</code>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-white/8 bg-white/4 p-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Topics</div>
+                <div className="mt-2 text-2xl font-semibold text-white">{topics.length}</div>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-white/4 p-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Block IDs</div>
+                <div className="mt-2 text-2xl font-semibold text-white">{blockIds.length}</div>
+              </div>
             </div>
           </div>
-          <div className="h-[calc(100vh-41px)] bg-ink">
-            <Editor
-              height="100%"
-              defaultLanguage="markdown"
-              value={markdown}
-              theme="vs-dark"
-              options={{ minimap: { enabled: false }, wordWrap: "on", fontSize: 13 }}
-              onMount={(editor, monaco) => {
-                editorRef.current = editor;
-                monacoRef.current = monaco;
-                const provider = new WebsocketProvider("ws://localhost:1234", `topic:${selectedTopic}`, ydoc);
-                const model = editor.getModel();
-                if (!model) return;
-                new MonacoBinding(ytext, model, new Set([editor]), provider.awareness);
-              }}
-              onChange={(v) => {
-                if (typeof v === "string") setMarkdown(v);
-              }}
-            />
-          </div>
-        </section>
 
-        <section className="col-span-3 border-r-[4px] border-safetyOrange flex flex-col bg-cardboard">
-          <div className="px-3 py-2 border-b-[4px] border-safetyOrange text-sm font-bold uppercase text-terminalGreen">
-            Template validation (machine)
-          </div>
-          <div className="p-3 overflow-auto text-xs flex-1 text-terminalGreen">
-            {validation ? (
-              <>
-                <div className="mb-2">
-                  <div>
-                    Schema: <span className="text-terminalGreen/95">{validation.schemaFile ?? "—"}</span>
-                  </div>
-                  <div>
-                    Status:{" "}
-                    <span className={validation.ok ? "text-terminalGreen" : "text-safetyOrange"}>
-                      {validation.ok ? "OK" : "INVALID"}
-                    </span>
-                  </div>
-                </div>
-                {!validation.ok && validation.errors.length ? (
-                  <ul className="list-disc ml-4 mb-3 text-safetyOrange/95">
-                    {validation.errors.map((e, idx) => (
-                      <li key={idx}>{e}</li>
-                    ))}
-                  </ul>
-                ) : null}
-                <div className="text-terminalGreen/90 mb-1">Derived structure</div>
-                <pre className="bg-ink border-[3px] border-safetyOrange rounded p-2 whitespace-pre-wrap break-words">
-                  {JSON.stringify(validation.structured, null, 2)}
-                </pre>
-              </>
-            ) : (
-              <div className="text-terminalGreen/70">No validation loaded.</div>
-            )}
-          </div>
-        </section>
-
-        <section className="col-span-2 flex flex-col">
-          <div className="px-3 py-2 border-b-[4px] border-safetyOrange text-sm font-bold uppercase text-terminalGreen bg-cardboard">
-            History
-          </div>
-          <div className="p-3 overflow-auto text-xs flex-1 bg-cardboard text-terminalGreen">
-            {tracker ? (
-              <table className="w-full text-left border-collapse">
-                <thead className="text-terminalGreen/90">
-                  <tr>
-                    <th className="pb-2">Block_ID</th>
-                    <th className="pb-2">Time</th>
-                    <th className="pb-2">Who</th>
-                    <th className="pb-2">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tracker.events
-                    .slice()
-                    .reverse()
-                    .slice(0, 50)
-                    .map((e, idx) => (
-                      <tr
-                        key={`${e.block_id}-${e.timestamp}-${idx}`}
-                        className="border-t border-safetyOrange/30 hover:bg-ink2 cursor-pointer"
-                        onClick={() => setTargetBlockId(e.block_id)}
-                      >
-                        <td className="py-1 pr-2 truncate max-w-[6rem]" title={e.block_id}>
-                          {e.block_id}
-                        </td>
-                        <td className="py-1 pr-2">{new Date(e.timestamp).toLocaleTimeString()}</td>
-                        <td className="py-1 pr-2">{e.author}</td>
-                        <td className="py-1">{e.action}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="text-terminalGreen/70">No history yet.</div>
-            )}
+          <div className="mt-6 flex min-h-0 flex-1 flex-col">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Topics</div>
+              <div className="text-xs text-slate-500">{selectedTopic}</div>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto pr-1">
+              {topics.map((topic) => {
+                const isSelected = topic === selectedTopic;
+                return (
+                  <button
+                    key={topic}
+                    onClick={() => setSelectedTopic(topic)}
+                    className={[
+                      "rounded-2xl border px-3 py-3 text-left text-sm transition-all",
+                      isSelected
+                        ? "border-cyan-400/35 bg-cyan-400/14 text-white shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
+                        : "border-white/8 bg-white/4 text-slate-300 hover:border-white/16 hover:bg-white/7"
+                    ].join(" ")}
+                  >
+                    <div className="font-medium">{topic}</div>
+                    <div className="mt-1 text-xs text-slate-500">Open topic and sync editor state.</div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="border-t-[4px] border-safetyOrange p-3 bg-cardboard">
-            <div className="text-xs text-terminalGreen/90 mb-1">LLM sidebar (mock)</div>
-            <label className="text-xs text-terminalGreen/80">
-              Block_ID
-              <input
-                value={targetBlockId}
-                onChange={(e) => setTargetBlockId(e.target.value)}
-                className="mt-1 w-full bg-ink border-[3px] border-safetyOrange/60 rounded px-2 py-1 text-terminalGreen"
-                placeholder="uuid"
-              />
+          <div className="mt-6 space-y-3 border-t border-white/10 pt-4">
+            <label className="block text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+              Save as
+              <select
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
+                value={author}
+                onChange={(e) => setAuthor(e.target.value as "Human" | "LLM")}
+              >
+                <option value="Human">Human</option>
+                <option value="LLM">LLM</option>
+              </select>
             </label>
-            <textarea
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              className="mt-2 w-full h-20 bg-ink border-[3px] border-safetyOrange/60 rounded px-2 py-1 text-xs text-terminalGreen"
-              placeholder="Instruction for propose_edit (e.g., tighten requirements wording)."
-            />
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={runProposeEdit}
-                className="flex-1 bg-ink hover:bg-ink2 rounded px-2 py-1 text-xs font-bold border-[3px] border-safetyOrange/40 text-terminalGreen"
-              >
-                propose_edit
-              </button>
-              <button
-                onClick={applyProposal}
-                className="flex-1 bg-safetyOrange hover:bg-safetyOrange/90 rounded px-2 py-1 text-xs font-bold border-[3px] border-terminalGreen text-ink"
-              >
-                Apply
-              </button>
+
+            {topicLoadError ? (
+              <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">
+                Topic load error: {topicLoadError}
+              </div>
+            ) : null}
+
+            {saveError ? (
+              <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">
+                Save failed: {saveError}
+              </div>
+            ) : null}
+
+            <button
+              onClick={save}
+              disabled={isSaving}
+              className="w-full rounded-2xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-cyan-400/60"
+            >
+              {isSaving ? "Saving..." : "Save + track"}
+            </button>
+          </div>
+        </aside>
+
+        <main className="panel-surface flex min-h-0 flex-col overflow-hidden rounded-3xl border border-white/10">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Current topic</div>
+              <h2 className="mt-2 text-xl font-semibold text-white">{selectedTopic}</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Edit markdown directly while preserving inline <code> @id </code> comments.
+              </p>
             </div>
-            <div className="mt-2 max-h-32 overflow-auto text-[11px] text-terminalGreen/90">
-              {chatLog.slice(-4).map((m, idx) => (
-                <pre
-                  key={idx}
-                  className="whitespace-pre-wrap break-words bg-ink border-[3px] border-safetyOrange/40 rounded p-2 mb-2"
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={[
+                  "rounded-full px-3 py-1 text-xs font-medium",
+                  validation?.ok
+                    ? "border border-emerald-400/20 bg-emerald-400/10 text-emerald-200"
+                    : "border border-amber-400/20 bg-amber-400/10 text-amber-200"
+                ].join(" ")}
+              >
+                {validation?.ok ? "Validation passing" : "Needs review"}
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs font-medium text-slate-300">
+                {blockIds.length} block IDs
+              </span>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 p-4">
+            <div className="editor-shell flex h-full min-h-[440px] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/72">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/8 px-4 py-3 text-sm">
+                <div className="font-medium text-slate-100">Markdown editor</div>
+                <div className="text-xs text-slate-500">Monaco, wrapped lines, distraction-reduced chrome</div>
+              </div>
+              <div className="min-h-0 flex-1">
+                <Editor
+                  key={selectedTopic}
+                  height="100%"
+                  defaultLanguage="markdown"
+                  value={markdown}
+                  options={{
+                    minimap: { enabled: false },
+                    wordWrap: "on",
+                    fontSize: 14,
+                    lineNumbers: "off",
+                    glyphMargin: false,
+                    folding: false,
+                    overviewRulerBorder: false,
+                    overviewRulerLanes: 0,
+                    renderLineHighlight: "none",
+                    scrollBeyondLastLine: false,
+                    padding: { top: 18, bottom: 18 }
+                  }}
+                  onMount={(editor, monaco) => {
+                    monaco.editor.defineTheme("snort-clean", {
+                      base: "vs-dark",
+                      inherit: true,
+                      rules: [],
+                      colors: {
+                        "editor.background": "#0b1220",
+                        "editor.foreground": "#e2e8f0",
+                        "editor.selectionBackground": "#0ea5e955",
+                        "editorLineNumber.foreground": "#475569",
+                        "editorCursor.foreground": "#22d3ee",
+                        "editor.inactiveSelectionBackground": "#0f172a"
+                      }
+                    });
+                    monaco.editor.setTheme("snort-clean");
+
+                    const provider = new WebsocketProvider(
+                      "ws://localhost:1234",
+                      `topic:${selectedTopic}`,
+                      ydoc
+                    );
+                    const model = editor.getModel();
+                    if (!model) {
+                      provider.destroy();
+                      return;
+                    }
+
+                    const binding = new MonacoBinding(ytext, model, new Set([editor]), provider.awareness);
+                    editor.onDidDispose(() => {
+                      binding.destroy();
+                      provider.destroy();
+                    });
+                  }}
+                  onChange={(value) => {
+                    if (typeof value === "string") setMarkdown(value);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <section className="grid min-h-0 gap-4 xl:grid-rows-[minmax(0,1.15fr)_minmax(0,0.9fr)_auto]">
+          <div className="panel-surface min-h-0 overflow-hidden rounded-3xl border border-white/10">
+            <div className="border-b border-white/10 px-5 py-4">
+              <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Validation</div>
+              <h3 className="mt-2 text-lg font-semibold text-white">Template status</h3>
+            </div>
+            <div className="space-y-4 overflow-auto p-5 text-sm">
+              {validation ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                    <div className="rounded-2xl border border-white/8 bg-white/4 p-3">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Schema</div>
+                      <div className="mt-2 text-sm text-slate-100">{validation.schemaFile ?? "None"}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-white/4 p-3">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Status</div>
+                      <div className={["mt-2 text-sm font-medium", validation.ok ? "text-emerald-300" : "text-amber-300"].join(" ")}>
+                        {validation.ok ? "Passing" : "Invalid"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {!validation.ok && validation.errors.length ? (
+                    <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3 text-amber-100">
+                      <div className="text-xs uppercase tracking-[0.18em] text-amber-200/80">Issues</div>
+                      <ul className="mt-2 space-y-2">
+                        {validation.errors.map((error, idx) => (
+                          <li key={idx}>{error}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                      Derived structure
+                    </div>
+                    <pre className="rounded-2xl border border-white/8 bg-slate-950/80 p-4 text-xs leading-6 text-slate-300">
+                      {stringifyContent(validation.structured)}
+                    </pre>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-white/8 bg-white/4 p-4 text-slate-400">
+                  No validation loaded.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="panel-surface min-h-0 overflow-hidden rounded-3xl border border-white/10">
+            <div className="border-b border-white/10 px-5 py-4">
+              <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">History</div>
+              <h3 className="mt-2 text-lg font-semibold text-white">Recent tracked changes</h3>
+            </div>
+            <div className="overflow-auto p-4">
+              {historyError ? (
+                <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">
+                  History failed to load: {historyError}
+                </div>
+              ) : null}
+
+              {recentEvents.length ? (
+                <div className="space-y-2">
+                  {recentEvents.map((event, index) => (
+                    <button
+                      key={`${event.block_id}-${event.timestamp}-${index}`}
+                      onClick={() => setTargetBlockId(event.block_id)}
+                      className="w-full rounded-2xl border border-white/8 bg-white/4 p-3 text-left transition hover:border-cyan-400/25 hover:bg-cyan-400/8"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium text-white" title={event.block_id}>
+                            {shortenId(event.block_id)}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">{formatTimestamp(event.timestamp)}</div>
+                        </div>
+                        <span className="rounded-full border border-white/10 bg-slate-900/80 px-2.5 py-1 text-[11px] font-medium text-slate-300">
+                          {event.action}
+                        </span>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-400">
+                        {event.author} • {event.summary || "Tracked change"}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-white/8 bg-white/4 p-4 text-sm text-slate-400">
+                  No history yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="panel-surface rounded-3xl border border-white/10 p-5">
+            <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Assistant</div>
+            <h3 className="mt-2 text-lg font-semibold text-white">Propose block edits</h3>
+            <p className="mt-1 text-sm text-slate-400">
+              Use a block ID from the current topic or click an item in history to target it.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <label className="block text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                Target block ID
+                <input
+                  value={targetBlockId}
+                  onChange={(e) => setTargetBlockId(e.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
+                  placeholder="uuid"
+                />
+              </label>
+
+              <label className="block text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                Instruction
+                <textarea
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  className="mt-2 h-28 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
+                  placeholder="Tighten this requirement, add a missing acceptance criterion, or rewrite for clarity."
+                />
+              </label>
+
+              {chatError ? (
+                <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">
+                  {chatError}
+                </div>
+              ) : null}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={runProposeEdit}
+                  disabled={isProposing}
+                  className="flex-1 rounded-2xl border border-white/10 bg-white/6 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {m.role}: {typeof m.content === "string" ? m.content : JSON.stringify(m.content, null, 2)}
-                </pre>
-              ))}
+                  {isProposing ? "Working..." : "Run propose_edit"}
+                </button>
+                <button
+                  onClick={applyProposal}
+                  className="flex-1 rounded-2xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
+                >
+                  Apply proposal
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Recent assistant activity</div>
+              <div className="max-h-48 space-y-2 overflow-auto">
+                {chatLog.length ? (
+                  chatLog.slice(-4).map((message, idx) => (
+                    <pre
+                      key={idx}
+                      className="overflow-auto rounded-2xl border border-white/8 bg-slate-950/78 p-3 text-xs leading-6 text-slate-300"
+                    >
+                      {message.role}: {stringifyContent(message.content)}
+                    </pre>
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-white/8 bg-white/4 p-4 text-sm text-slate-400">
+                    No assistant activity yet.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </section>
-      </main>
+      </div>
     </div>
   );
 }
-
