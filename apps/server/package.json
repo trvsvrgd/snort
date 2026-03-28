@@ -4,9 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/index.js",
-    "start": "node src/index.js",
-    "test": "node --test test/blockIds.test.js"
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.0",
@@ -14,13 +16,20 @@
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "js-yaml": "^4.1.0",
-    "remark": "^15.0.1",
-    "remark-parse": "^11.0.0",
     "zod": "^3.25.76",
     "uuid": "^11.1.0",
     "ws": "^8.18.3",
-    "y-websocket": "^3.0.0",
     "yjs": "^13.6.27"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.19.3",
+    "@types/supertest": "^6.0.3",
+    "@types/ws": "^8.18.1",
+    "supertest": "^7.1.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }
-

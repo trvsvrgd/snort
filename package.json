@@ -7,12 +7,12 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace apps/server & npm run dev --workspace apps/web",
+    "dev": "npm run dev --workspace @arfm/server & npm run dev --workspace @arfm/web",
     "dev:web": "npm run dev --workspace apps/web",
     "dev:server": "npm run dev --workspace apps/server",
     "build": "npm run build --workspace apps/web",
     "start": "npm run start --workspace apps/server",
-    "typecheck": "npm run typecheck --workspace @arfm/web",
+    "typecheck": "npm run typecheck --workspace @arfm/web && npm run typecheck --workspace @arfm/server",
     "lint": "npm run lint --workspace apps/web",
     "test": "npm run test --workspace @arfm/server"
   },

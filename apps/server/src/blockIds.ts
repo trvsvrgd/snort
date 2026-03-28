@@ -2,11 +2,9 @@ import { v4 as uuidv4 } from "uuid";
 
 const ID_RE = /^<!--\s*@id:\s*([0-9a-fA-F-]{8,})\s*-->\s*$/;
 
-export function ensureBlockIds(markdown) {
-  // Ensures every H2 section has an immediately preceding <!-- @id: ... --> line.
-  // If missing, inserts a UUID tag.
+export function ensureBlockIds(markdown: string): string {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
-  const out = [];
+  const out: string[] = [];
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -22,15 +20,14 @@ export function ensureBlockIds(markdown) {
   return out.join("\n");
 }
 
-export function extractBlocks(markdown) {
-  // Extract blocks keyed by @id. We treat each H2 section as a block.
+export function extractBlocks(markdown: string): Map<string, string> {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
-  const blocks = new Map();
+  const blocks = new Map<string, string>();
 
-  let currentId = null;
-  let currentLines = [];
+  let currentId: string | null = null;
+  let currentLines: string[] = [];
 
-  function flush() {
+  function flush(): void {
     if (currentId) blocks.set(currentId, currentLines.join("\n").trimEnd());
     currentId = null;
     currentLines = [];
@@ -47,7 +44,6 @@ export function extractBlocks(markdown) {
     }
 
     if (/^##\s+/.test(line) && currentId === null) {
-      // In case a H2 appears without ID (shouldn't after ensureBlockIds), start an anonymous block.
       currentId = `missing-${i}`;
     }
 
@@ -57,4 +53,3 @@ export function extractBlocks(markdown) {
   flush();
   return blocks;
 }
-

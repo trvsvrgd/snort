@@ -2,32 +2,49 @@ import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import { historyDir, trackerPath } from "./paths.js";
 
-function sha256(text) {
+function sha256(text: string): string {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-/** Default tracker shape when `history/tracker.json` is missing (first run). */
-const EMPTY_TRACKER = { version: 1, events: [] };
+export type TrackerAuthor = "Human" | "LLM";
+export type TrackerAction = "Add" | "Edit" | "Delete";
 
-/**
- * @returns {Promise<{ version: number, events: unknown[] }>}
- */
-export async function readTracker() {
+export interface TrackerEvent {
+  block_id: string;
+  timestamp: string;
+  author: TrackerAuthor;
+  action: TrackerAction;
+  summary: string;
+}
+
+export interface TrackerData {
+  version: number;
+  events: TrackerEvent[];
+}
+
+const EMPTY_TRACKER: TrackerData = { version: 1, events: [] };
+
+export async function readTracker(): Promise<TrackerData> {
   try {
     const raw = await fs.readFile(trackerPath, "utf8");
-    return JSON.parse(raw);
+    return JSON.parse(raw) as TrackerData;
   } catch (err) {
-    if (err && typeof err === "object" && "code" in err && /** @type {{ code?: string }} */ (err).code === "ENOENT") {
+    if (nodeErrCode(err) === "ENOENT") {
       return { ...EMPTY_TRACKER, events: [...EMPTY_TRACKER.events] };
     }
     throw err;
   }
 }
 
-/**
- * @param {unknown[]} events
- */
-export async function appendEvents(events) {
+function nodeErrCode(err: unknown): string | undefined {
+  if (err && typeof err === "object" && "code" in err) {
+    const c = (err as { code?: unknown }).code;
+    return typeof c === "string" ? c : undefined;
+  }
+  return undefined;
+}
+
+export async function appendEvents(events: TrackerEvent[]): Promise<TrackerData> {
   await fs.mkdir(historyDir, { recursive: true });
   const tracker = await readTracker();
   tracker.events.push(...events);
@@ -35,14 +52,22 @@ export async function appendEvents(events) {
   return tracker;
 }
 
-export function diffBlocks({ beforeBlocks, afterBlocks, author }) {
+export function diffBlocks({
+  beforeBlocks,
+  afterBlocks,
+  author
+}: {
+  beforeBlocks: Map<string, string>;
+  afterBlocks: Map<string, string>;
+  author: TrackerAuthor;
+}): TrackerEvent[] {
   const now = new Date().toISOString();
-  const events = [];
+  const events: TrackerEvent[] = [];
 
-  const before = new Map();
+  const before = new Map<string, string>();
   for (const [id, content] of beforeBlocks.entries()) before.set(id, sha256(content));
 
-  const after = new Map();
+  const after = new Map<string, string>();
   for (const [id, content] of afterBlocks.entries()) after.set(id, sha256(content));
 
   for (const [id, afterHash] of after.entries()) {
@@ -82,4 +107,3 @@ export function diffBlocks({ beforeBlocks, afterBlocks, author }) {
 
   return events;
 }
-

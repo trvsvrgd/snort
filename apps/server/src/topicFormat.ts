@@ -1,17 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import yaml from "js-yaml";
-import Ajv from "ajv";
+import { Ajv, type ValidateFunction, type ErrorObject } from "ajv";
 import { createRequire } from "node:module";
 import { topicsDir, templatesDir } from "./paths.js";
 import { extractBlocks } from "./blockIds.js";
 
 const require = createRequire(import.meta.url);
-// Templates declare draft 2020-12, so we need Ajv to register the full
-// draft 2020-12 meta-schema set (schema.json + meta/* pieces).
-const addMetaSchema202012 = require("ajv/dist/refs/json-schema-2020-12").default;
+const addMetaSchema202012 = require("ajv/dist/refs/json-schema-2020-12").default as (this: Ajv) => void;
 
-export async function listTopics() {
+export async function listTopics(): Promise<string[]> {
   const entries = await fs.readdir(topicsDir, { withFileTypes: true });
   return entries
     .filter((e) => e.isFile() && e.name.endsWith(".md"))
@@ -19,26 +17,39 @@ export async function listTopics() {
     .sort();
 }
 
-export function parseFrontmatter(markdown) {
+export function parseFrontmatter(markdown: string): { data: Record<string, unknown>; body: string } {
   const normalized = markdown.replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n")) return { data: {}, body: normalized };
   const end = normalized.indexOf("\n---\n", 4);
   if (end === -1) return { data: {}, body: normalized };
   const fmText = normalized.slice(4, end);
   const body = normalized.slice(end + "\n---\n".length);
-  const data = yaml.load(fmText) ?? {};
+  const loaded = yaml.load(fmText);
+  const data = (loaded && typeof loaded === "object" && !Array.isArray(loaded) ? loaded : {}) as Record<
+    string,
+    unknown
+  >;
   return { data, body };
 }
 
-export async function loadTemplate(schemaFile) {
+export async function loadTemplate(schemaFile: string): Promise<unknown> {
   const full = path.join(templatesDir, schemaFile);
   const raw = await fs.readFile(full, "utf8");
-  return JSON.parse(raw);
+  return JSON.parse(raw) as unknown;
 }
 
-export async function validateTopicAgainstTemplate(markdown) {
+export type ValidationResult = {
+  ok: boolean;
+  schemaFile: string | null;
+  errors: string[];
+  structured: unknown;
+};
+
+export async function validateTopicAgainstTemplate(markdown: string): Promise<ValidationResult> {
   const { data, body } = parseFrontmatter(markdown);
-  const schemaFile = data.template;
+  const rawTemplate = data.template;
+  const schemaFile = typeof rawTemplate === "string" ? rawTemplate : undefined;
+
   if (!schemaFile) {
     return {
       ok: false,
@@ -48,11 +59,11 @@ export async function validateTopicAgainstTemplate(markdown) {
     };
   }
 
-  let schema;
+  let schema: unknown;
   try {
     schema = await loadTemplate(schemaFile);
   } catch (err) {
-    if (err && typeof err === "object" && "code" in err && /** @type {{ code?: string }} */ (err).code === "ENOENT") {
+    if (nodeErrCode(err) === "ENOENT") {
       return {
         ok: false,
         schemaFile,
@@ -64,8 +75,9 @@ export async function validateTopicAgainstTemplate(markdown) {
     }
     throw err;
   }
+
   const blocks = extractBlocks(body);
-  const sections = [];
+  const sections: { id: string; title: string; body: string }[] = [];
 
   for (const [id, content] of blocks.entries()) {
     const lines = content.split("\n");
@@ -74,24 +86,21 @@ export async function validateTopicAgainstTemplate(markdown) {
     sections.push({ id, title, body: content });
   }
 
+  const topicTitle = data.topic ?? data.title;
   const structured = {
-    topic: data.topic ?? data.title ?? path.basename(schemaFile, ".schema.json"),
+    topic: typeof topicTitle === "string" ? topicTitle : path.basename(schemaFile, ".schema.json"),
     sections
   };
 
-  let validate;
+  let validate: ValidateFunction;
   try {
     const ajv = new Ajv({
       allErrors: true,
       allowUnionTypes: true,
-      // Ajv's strict mode can complain about draft 2020-12 keywords depending
-      // on configuration/version support. For this MVP we prefer validating
-      // topics to returning "schema compile errors".
-      strict: false,
+      strict: false
     });
-    // The meta-schema helper uses `this` internally (expects Ajv instance).
     addMetaSchema202012.call(ajv);
-    validate = ajv.compile(schema);
+    validate = ajv.compile(schema as object);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return {
@@ -102,13 +111,21 @@ export async function validateTopicAgainstTemplate(markdown) {
     };
   }
 
-  const ok = validate(structured);
+  const ok = validate(structured) as boolean;
+  const ajvErrors = (validate.errors ?? []) as ErrorObject[];
 
   return {
     ok: Boolean(ok),
     schemaFile,
-    errors: (validate.errors ?? []).map((e) => `${e.instancePath || "/"} ${e.message}`),
+    errors: ajvErrors.map((e) => `${e.instancePath || "/"} ${e.message}`),
     structured
   };
 }
 
+function nodeErrCode(err: unknown): string | undefined {
+  if (err && typeof err === "object" && "code" in err) {
+    const c = (err as { code?: unknown }).code;
+    return typeof c === "string" ? c : undefined;
+  }
+  return undefined;
+}
