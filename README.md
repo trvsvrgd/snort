@@ -101,7 +101,7 @@ npm run dev
 Production-style server run (after compile):
 
 ```bash
-npm run build --workspace @arfm/server
+npm run build:server
 npm run start --workspace @arfm/server
 ```
 

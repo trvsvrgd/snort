@@ -8,12 +8,13 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace @arfm/server & npm run dev --workspace @arfm/web",
-    "dev:web": "npm run dev --workspace apps/web",
-    "dev:server": "npm run dev --workspace apps/server",
-    "build": "npm run build --workspace apps/web",
-    "start": "npm run start --workspace apps/server",
+    "dev:web": "npm run dev --workspace @arfm/web",
+    "dev:server": "npm run dev --workspace @arfm/server",
+    "build": "npm run build --workspace @arfm/web",
+    "build:server": "npm run build --workspace @arfm/server",
+    "start": "npm run start --workspace @arfm/server",
     "typecheck": "npm run typecheck --workspace @arfm/web && npm run typecheck --workspace @arfm/server",
-    "lint": "npm run lint --workspace apps/web",
+    "lint": "npm run lint --workspace @arfm/web",
     "test": "npm run test --workspace @arfm/server"
   },
   "engines": {
