@@ -2,6 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { readTracker } from "./history.js";
+import { HttpError } from "./httpErrors.js";
 
 export function createMcpServer({ proposeEditImpl }) {
   const server = new Server(
@@ -17,16 +18,24 @@ export function createMcpServer({ proposeEditImpl }) {
       current_markdown: z.string().optional()
     },
     async ({ block_id, instruction, current_markdown }) => {
-      const tracker = await readTracker();
-      const result = await proposeEditImpl({ block_id, instruction, current_markdown, tracker });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }
-        ]
-      };
+      try {
+        const tracker = await readTracker();
+        const result = await proposeEditImpl({ block_id, instruction, current_markdown, tracker });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (e) {
+        const msg = e instanceof HttpError ? e.message : e instanceof Error ? e.message : String(e);
+        return {
+          isError: true,
+          content: [{ type: "text", text: JSON.stringify({ ok: false, error: msg }, null, 2) }]
+        };
+      }
     }
   );
 

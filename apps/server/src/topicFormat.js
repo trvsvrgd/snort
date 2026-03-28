@@ -48,7 +48,22 @@ export async function validateTopicAgainstTemplate(markdown) {
     };
   }
 
-  const schema = await loadTemplate(schemaFile);
+  let schema;
+  try {
+    schema = await loadTemplate(schemaFile);
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && /** @type {{ code?: string }} */ (err).code === "ENOENT") {
+      return {
+        ok: false,
+        schemaFile,
+        errors: [
+          `Template schema not found: ${schemaFile}. SNORT needs the matching file under /templates/.`
+        ],
+        structured: null
+      };
+    }
+    throw err;
+  }
   const blocks = extractBlocks(body);
   const sections = [];
 

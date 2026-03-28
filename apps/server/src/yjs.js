@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import * as Y from "yjs";
+import { log } from "./logger.js";
 
 // Minimal Yjs websocket server (MVP).
 // We keep this tiny to avoid relying on private y-websocket internals.
@@ -60,7 +61,9 @@ export function startYjsWebsocketServer({ port = 1234 } = {}) {
     });
   });
 
-  server.listen(port);
+  server.listen(port, () => {
+    log.info(`Yjs collaboration socket on ws://localhost:${port}`);
+  });
   return { server, wss, port };
 }
 

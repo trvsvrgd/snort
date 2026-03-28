@@ -1,17 +1,34 @@
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
-import { trackerPath } from "./paths.js";
+import { historyDir, trackerPath } from "./paths.js";
 
 function sha256(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
 
+/** Default tracker shape when `history/tracker.json` is missing (first run). */
+const EMPTY_TRACKER = { version: 1, events: [] };
+
+/**
+ * @returns {Promise<{ version: number, events: unknown[] }>}
+ */
 export async function readTracker() {
-  const raw = await fs.readFile(trackerPath, "utf8");
-  return JSON.parse(raw);
+  try {
+    const raw = await fs.readFile(trackerPath, "utf8");
+    return JSON.parse(raw);
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && /** @type {{ code?: string }} */ (err).code === "ENOENT") {
+      return { ...EMPTY_TRACKER, events: [...EMPTY_TRACKER.events] };
+    }
+    throw err;
+  }
 }
 
+/**
+ * @param {unknown[]} events
+ */
 export async function appendEvents(events) {
+  await fs.mkdir(historyDir, { recursive: true });
   const tracker = await readTracker();
   tracker.events.push(...events);
   await fs.writeFile(trackerPath, JSON.stringify(tracker, null, 2), "utf8");
