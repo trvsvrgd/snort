@@ -4,6 +4,9 @@ import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { MonacoBinding } from "y-monaco";
 
+/** Yjs sync endpoint (override with `VITE_YJS_WS_URL` in `.env` for non-default hosts). */
+const YJS_WS_URL = import.meta.env.VITE_YJS_WS_URL ?? "ws://localhost:1234";
+
 type ValidationResult = {
   ok: boolean;
   schemaFile: string | null;
@@ -30,9 +33,29 @@ type TrackerEvent = {
 type Tracker = { version: number; events: TrackerEvent[] };
 type ChatMessage = { role: string; content: unknown };
 
+type ApiErrorBody = { ok?: boolean; error?: string; code?: string };
+
+/**
+ * Reads JSON `{ error, code }` from failed API responses when present.
+ */
+async function readApiErrorMessage(res: Response): Promise<string> {
+  const fallback = `${res.status} ${res.statusText}`;
+  const ct = res.headers.get("content-type") ?? "";
+  if (!ct.includes("application/json")) return fallback;
+  try {
+    const data = (await res.json()) as ApiErrorBody;
+    if (typeof data.error === "string" && data.error.length > 0) {
+      return data.code ? `${data.error} (${data.code})` : data.error;
+    }
+  } catch {
+    /* ignore malformed JSON */
+  }
+  return fallback;
+}
+
 async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(await readApiErrorMessage(res));
   return (await res.json()) as T;
 }
 
@@ -42,7 +65,7 @@ async function apiPut<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(await readApiErrorMessage(res));
   return (await res.json()) as T;
 }
 
@@ -52,7 +75,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(await readApiErrorMessage(res));
   return (await res.json()) as T;
 }
 
@@ -103,9 +126,11 @@ export function App() {
   const [author, setAuthor] = useState<"Human" | "LLM">("Human");
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isProposing, setIsProposing] = useState(false);
+  const [isTopicLoading, setIsTopicLoading] = useState(false);
 
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
@@ -123,50 +148,63 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (saveSuccess) {
+      const t = window.setTimeout(() => setSaveSuccess(null), 4500);
+      return () => window.clearTimeout(t);
+    }
+    return undefined;
+  }, [saveSuccess]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadTopicAndHistory() {
+      setIsTopicLoading(true);
       setTopicLoadError(null);
       setHistoryError(null);
       setSaveError(null);
       setChatError(null);
 
-      const [topicResult, historyResult] = await Promise.allSettled([
-        apiGet<TopicResponse>(`/api/topics/${encodeURIComponent(selectedTopic)}`),
-        apiGet<Tracker>("/api/history")
-      ]);
+      try {
+        const [topicResult, historyResult] = await Promise.allSettled([
+          apiGet<TopicResponse>(`/api/topics/${encodeURIComponent(selectedTopic)}`),
+          apiGet<Tracker>("/api/history")
+        ]);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (topicResult.status === "fulfilled") {
-        const topic = topicResult.value;
-        setMarkdown(topic.markdown);
-        setValidation(topic.validation);
-        ydoc.transact(() => {
-          ytext.delete(0, ytext.length);
-          ytext.insert(0, topic.markdown);
-        });
-        setTargetBlockId(extractIds(topic.markdown)[0] ?? "");
-      } else {
-        const msg =
-          topicResult.reason instanceof Error ? topicResult.reason.message : String(topicResult.reason);
-        setTopicLoadError(msg);
-        setMarkdown("");
-        setValidation({
-          ok: false,
-          schemaFile: null,
-          errors: [msg],
-          structured: null
-        });
-      }
+        if (topicResult.status === "fulfilled") {
+          const topic = topicResult.value;
+          setMarkdown(topic.markdown);
+          setValidation(topic.validation);
+          ydoc.transact(() => {
+            ytext.delete(0, ytext.length);
+            ytext.insert(0, topic.markdown);
+          });
+          setTargetBlockId(extractIds(topic.markdown)[0] ?? "");
+        } else {
+          const msg =
+            topicResult.reason instanceof Error ? topicResult.reason.message : String(topicResult.reason);
+          setTopicLoadError(msg);
+          setMarkdown("");
+          setValidation({
+            ok: false,
+            schemaFile: null,
+            errors: [msg],
+            structured: null
+          });
+        }
 
-      if (historyResult.status === "fulfilled") {
-        setTracker(historyResult.value);
-      } else {
-        const msg =
-          historyResult.reason instanceof Error ? historyResult.reason.message : String(historyResult.reason);
-        setHistoryError(msg);
-        setTracker(null);
+        if (historyResult.status === "fulfilled") {
+          setTracker(historyResult.value);
+        } else {
+          const msg =
+            historyResult.reason instanceof Error ? historyResult.reason.message : String(historyResult.reason);
+          setHistoryError(msg);
+          setTracker(null);
+        }
+      } finally {
+        if (!cancelled) setIsTopicLoading(false);
       }
     }
 
@@ -186,6 +224,7 @@ export function App() {
   async function save() {
     setIsSaving(true);
     setSaveError(null);
+    setSaveSuccess(null);
     try {
       const r = await apiPut<{ markdown: string; validation: ValidationResult }>(
         `/api/topics/${encodeURIComponent(selectedTopic)}`,
@@ -194,6 +233,7 @@ export function App() {
       setValidation(r.validation);
       setMarkdown(r.markdown);
       setTracker(await apiGet<Tracker>("/api/history"));
+      setSaveSuccess("Happy snort—saved, validated, and logged to history.");
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -230,16 +270,25 @@ export function App() {
   }
 
   function applyProposal() {
+    setChatError(null);
     const replacement = [...chatLog]
       .reverse()
       .map((message) => getReplacementMarkdown(message.content))
       .find(Boolean);
-    if (!replacement) return;
+    if (!replacement) {
+      setChatError("No proposal in the log yet—run propose_edit first so SNORT has something to apply.");
+      return;
+    }
 
     const md = ytext.toString();
     const lines = md.split(/\r?\n/);
     const idLineIdx = lines.findIndex((l) => l.trim().includes(`@id: ${targetBlockId}`));
-    if (idLineIdx < 0) return;
+    if (idLineIdx < 0) {
+      setChatError(
+        `Can't find that block ID in the editor. Pick a block that exists in this topic, or paste the full @id line.`
+      );
+      return;
+    }
 
     // Replace from id line until before next id line.
     let end = lines.length;
@@ -286,7 +335,9 @@ export function App() {
           <div className="mt-6 flex min-h-0 flex-1 flex-col">
             <div className="mb-3 flex items-center justify-between">
               <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Topics</div>
-              <div className="text-xs text-slate-500">{selectedTopic}</div>
+              <div className="text-xs text-slate-500">
+                {isTopicLoading ? "Loading…" : selectedTopic}
+              </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto pr-1">
               {topics.map((topic) => {
@@ -335,6 +386,12 @@ export function App() {
               </div>
             ) : null}
 
+            {saveSuccess ? (
+              <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
+                {saveSuccess}
+              </div>
+            ) : null}
+
             <button
               onClick={save}
               disabled={isSaving}
@@ -349,7 +406,9 @@ export function App() {
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
             <div>
               <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Current topic</div>
-              <h2 className="mt-2 text-xl font-semibold text-white">{selectedTopic}</h2>
+              <h2 className="mt-2 text-xl font-semibold text-white">
+                {isTopicLoading ? "Loading topic…" : selectedTopic}
+              </h2>
               <p className="mt-1 text-sm text-slate-400">
                 Edit markdown directly while preserving inline <code> @id </code> comments.
               </p>
@@ -412,11 +471,7 @@ export function App() {
                     });
                     monaco.editor.setTheme("snort-clean");
 
-                    const provider = new WebsocketProvider(
-                      "ws://localhost:1234",
-                      `topic:${selectedTopic}`,
-                      ydoc
-                    );
+                    const provider = new WebsocketProvider(YJS_WS_URL, `topic:${selectedTopic}`, ydoc);
                     const model = editor.getModel();
                     if (!model) {
                       provider.destroy();
