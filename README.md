@@ -57,7 +57,7 @@ Built for the "glitchy" reality of human-agent collaboration, SNORT acts as a vi
 ## Architecture (short)
 
 - **`apps/web`**: Vite + React + Monaco; proxies `/api` to the server in dev; connects to Yjs over WebSocket for collaborative editing.
-- **`apps/server`**: Express API for topics, template validation (Ajv + schemas in `/templates`), change history in `/history/tracker.json`, optional MCP stdio, and a small Yjs socket server.
+- **`apps/server`**: TypeScript + Express API for topics, template validation (Ajv + schemas in `/templates`), change history in `/history/tracker.json`, optional MCP stdio, and a small Yjs socket server. `createApp()` exposes the HTTP app without listening (used in tests).
 - **`/topics`**: Human-facing Markdown source of truth (see `AGENTS.md` for edit rules).
 
 ## The “Happy Pug” persona (feedback model)
@@ -82,9 +82,10 @@ API errors return JSON shaped like `{ "ok": false, "error": "...", "code": "..."
 
 ```bash
 npm test
+npm run typecheck
 ```
 
-Uses Node’s built-in test runner for critical parsing helpers (`blockIds`). Run `npm run typecheck` and `npm run lint` for the web workspace.
+`npm test` runs the server suite via `tsx` (block IDs, `diffBlocks`, frontmatter / validation against the repo topic, and Supertest HTTP checks). `npm run typecheck` typechecks **both** web and server. Use `npm run lint` in `apps/web` for ESLint.
 
 ## Quickstart
 
@@ -93,6 +94,15 @@ Prereqs: Node.js 20+
 ```bash
 npm install
 npm run dev
+```
+
+`npm run dev` at the repo root runs the web and server workspaces. The server uses **`tsx watch`** on TypeScript sources.
+
+Production-style server run (after compile):
+
+```bash
+npm run build --workspace @arfm/server
+npm run start --workspace @arfm/server
 ```
 
 Web UI: `http://localhost:5173`  
