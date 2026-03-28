@@ -54,6 +54,38 @@ Built for the "glitchy" reality of human-agent collaboration, SNORT acts as a vi
 - UI Vibes: "Heavy" borders (3px+), monospaced everything, and a UI that feels like a specialized tool you’d find in a server room in 1994.
 - Slogan: `Snort: Because your machine-readable files shouldn't be a black box. 🐽`
 
+## Architecture (short)
+
+- **`apps/web`**: Vite + React + Monaco; proxies `/api` to the server in dev; connects to Yjs over WebSocket for collaborative editing.
+- **`apps/server`**: Express API for topics, template validation (Ajv + schemas in `/templates`), change history in `/history/tracker.json`, optional MCP stdio, and a small Yjs socket server.
+- **`/topics`**: Human-facing Markdown source of truth (see `AGENTS.md` for edit rules).
+
+## The “Happy Pug” persona (feedback model)
+
+SNORT is meant to feel like a secretary with personality, not a silent pipe:
+
+- **Happy snorts**: Positive, plain-language confirmation when saves succeed, validation passes, or a workflow completes without drama.
+- **Snorts (alerts)**: Direct, actionable copy when something is wrong—missing files, bad topic names, missing `block_id`, or schema mismatch—without dumping stack traces to the UI.
+
+API errors return JSON shaped like `{ "ok": false, "error": "...", "code": "..." }` when the server uses `HttpError`, so the web UI can show the same messages you would surface to an agent.
+
+## Configuration
+
+| Variable | Where | Purpose |
+|----------|--------|---------|
+| `PORT` | Server | HTTP API port (default `5174`). |
+| `YJS_PORT` | Server | Yjs WebSocket port (default `1234`). |
+| `MCP_STDIO` | Server | Set to `1` to run the MCP server over stdio in the same process. |
+| `VITE_YJS_WS_URL` | Web (`.env`) | WebSocket URL for Yjs if not using `ws://localhost:1234`. |
+
+## Testing
+
+```bash
+npm test
+```
+
+Uses Node’s built-in test runner for critical parsing helpers (`blockIds`). Run `npm run typecheck` and `npm run lint` for the web workspace.
+
 ## Quickstart
 
 Prereqs: Node.js 20+
@@ -64,5 +96,6 @@ npm run dev
 ```
 
 Web UI: `http://localhost:5173`  
-API server: `http://localhost:5174`
+API server: `http://localhost:5174`  
+Yjs WebSocket: `ws://localhost:1234` (override in the web app with `VITE_YJS_WS_URL` if needed)
 
